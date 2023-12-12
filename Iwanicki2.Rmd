@@ -1,0 +1,431 @@
+---
+title: "Projekt - Adam Iwanicki"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Wstęp
+
+Poniższy projekt oparłem na danych GSS. 
+W pierwszej części przeprowadzę wstępną analizę dzietności z uwzglednieniem wybranych zmiennych.
+W drugiej części zaproponuję modele predykcyjne.
+W trzeciej podsumuję wyniki weryfikacji hipotez w oparciu o najlepsze modele.
+Sprawdzę czy na podstawie danych zebranych w latach 1972-2018 mozna wysnuć nastepujace wnioski:
+
+  1. Wyższe wykształcenie koreluje z mniejszą liczbą potomków.
+  
+  2. Brak wyznawanej religii koreluje z mniejszą liczbą potomków.
+  
+  3. Aktywność zawodowa koreluje z mniejszą liczbą potomków.
+  
+  
+Pakiety z których korzystam:
+```{r message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(Metrics)
+library(gridExtra)
+```
+
+W celu skompresowania analizy od momentu wprowadzenia zmiennych skategoryzowanych podsumowania modelu ograniczam do dostosowanej statystyki R kwadrat, oraz od początku ograniczam ilość wykresów diagnostycznych model do moim zdaniem niezbędnego minimum.
+
+Projekt wykonałem samodzielnie, ponieważ od osoby z pary otrzymałem odpowiedź: "nie studiuję mmad".
+
+# Analiza
+
+## Wgląd w strukturę danych
+
+```{r}
+load("GSSdata.Rdata")
+GSS.data <- data.frame(GSS.data)
+dim(GSS.data)
+```
+
+Cały zbiór jest olbrzymi, 64814 wierszy w 6108 kategoriach. Niestety duża część
+zadawanych pytań zmieniała się na przestrzeni lat, do analizy starałem sie wybrać 
+jak najmniej wybrakowane kolumny. Utworzę nową ramkę danych i zaimportuję jedynie 
+interesujace mnie zmienne, resztę "wyładuję" ze środowiska.
+
+
+```{r}
+df <- data.frame(GSS.data)[c('YEAR', 'SEX', 'AGE', 'SIBS', 'EDUC', 'CHILDS',
+                             'DEGREE', 'WRKSTAT', 'RELIG')]
+rm(GSS.data)
+summary(df)
+```
+
+
+## Czyszczenie danych
+
+Następnym krokiem będzie usunięcie wpisów z nieznanymi wartościami w kluczowych polach.
+
+```{r}
+df <- df[with(df, ifelse(DEGREE!='NA', TRUE, FALSE)),]
+df <- df[with(df, ifelse(DEGREE!='DK', TRUE, FALSE)),]
+df <- df[with(df, ifelse(WRKSTAT!='NA', TRUE, FALSE)),]
+df <- df[with(df, ifelse(RELIG!='NA', TRUE, FALSE)),]
+df <- df[with(df, ifelse(RELIG!='DK', TRUE, FALSE)),]
+
+dim(df)
+summary(df)
+```
+
+
+Wszystkie zmienne poza rokiem uzyskania odpowiedzi sa kategoryczne, 
+jednak moim zdaniem istotę części z nich będzie oddawać forma numeryczna. 
+Zmienię: wiek, subiektywne odczucie poziomu zycia, liczby ukonczonych klas, 
+rodzenstwa i dzieci. Dodamy także binarną zmienną religijności. 
+
+
+```{r}
+df <- df %>%  mutate(  AGE = as.integer(AGE) + 17, # 18 lat ma indeks 1
+                       CHILDS = as.integer(CHILDS) - 1, # 0 dzieci ma indeks 1
+                       SIBS = as.integer(SIBS) - 1, # 0 rodzeństwa ma indeks 1
+                       EDUC = as.integer(EDUC) - 1) # 0 ukończonych klas ma indeks 1
+df$religious <- with(df, ifelse(RELIG!='NONE', TRUE, FALSE))
+summary(df)
+```
+
+
+## Wgląd w dane
+
+### Ad 1.
+```{r, warning=FALSE}
+ggplot(df, aes(x = DEGREE, fill = DEGREE)) + 
+  geom_histogram(stat="count", alpha=0.5) +
+  theme(legend.position = 'none')
+```
+
+```{r, warning=FALSE}
+ggplot(df, aes(x = CHILDS, color = DEGREE)) + 
+  geom_density(adjust = 3, size = 1.5) +
+  scale_x_continuous(breaks=0:9)
+```
+Dla lepszego zobrazowania danych (szczególnie większych ilości pociech) zdecydowałem się na umieszczenie także wykresu stosowego:
+
+```{r, warning=FALSE}
+ggplot(df, aes(x = CHILDS, fill = DEGREE)) + 
+  stat_density(adjust = 3, alpha = .5) +
+  scale_x_continuous(breaks=0:9)
+```
+
+Powyższe wykresy zdają się potwierdzać naszą hipotezę. Na wykresie gęstości zdecydowanie widać, że osoby z wyższym wykształceniem częściej nie posiadają wcale dzieci, oraz istotnie rzadziej decydują się więej niż czworo. Na powyżej pięciorga pociech najczęściej decydują się osoby poniżej średniego wykształcenia (less than high school). Warto zrobić jeszcze wykres uśredniający liczbę dzieci dla ilości ukończonych klas.
+
+
+```{r, warning=FALSE}
+ggplot(df, aes(x = EDUC, y = CHILDS)) + 
+  geom_smooth(aes(color = SEX), method='lm') + 
+  coord_cartesian(ylim = c(0, 10))
+```
+
+Podsumowując wydaje się, że występuje badana zależność. Efekt wydaje się być silniejszy w przypadku kobiet. 
+
+
+
+### Ad 2.
+
+```{r, warning=FALSE}
+ggplot(df, aes(x = RELIG, fill=RELIG))+
+  geom_histogram(stat='count')+ 
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1), legend.position = 'none')
+
+ggplot(df, aes(x = CHILDS, fill = religious)) + 
+  geom_density(adjust = 3, alpha = .6) +
+  scale_x_continuous(breaks=0:9)
+```
+Powyższy wykres zdaje się potwierdzać naszą hipotezę. W naszym zbiorze przeważają protestanci i katolicy, jednak ponad 10% deklaruje brak przynależności do grupy wyznaniowej. 
+
+### Ad 3.
+```{r, warning=FALSE}
+ggplot(df, aes(x = WRKSTAT, y = CHILDS, fill = WRKSTAT)) +
+  facet_wrap(~SEX)+
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1), legend.position = 'none') +
+  scale_y_continuous(breaks=0:9)+
+  stat_summary(fun.y=mean, geom="point", shape=23, size=4)
+```
+Na podstawie powyższych wykresów ciężko wysnuć uniwersalne wnioski. Obie płcie pracujące na pełen etat mają minimalnie obniżoną średnią (zaznaczona rombem) liczbę potomstwa. U mężczyzn zdecydowanie status ucznia obniża dzietność, natomiast niepełny etat jak i wstrzymanie się od pracy lekko zbiegają się ze spadkiem. Spodziewałem się większej różnicy. W przypadku kobiet uczących się widzimy delikatny spadek ilości dzieci, jednak nie tak silny jak u mężczyzn. Natomiast pozycja zawodowa zdaje się nie mieć wpływu na dzietność, chociaż decyzja o wstrzymaniu się od pracy na rzecz opiekowania się domem (w tym potomstwem) delikatnie podnosi nam 3. kwantyl jak i średnią.
+
+Warto zaznaczyć, że w przypadku badania niektórych statusów zawodowych, są one powiązane z wiekiem. Emeryci i uczniowie (poza wyjątkami) należą do dwóch przeciwlegych grup wiekowych.
+
+
+### Analiza potencjalnych interakcji
+
+Warta zbadania wydaje się uśrednieniona zależność między ilością dzieci i rodzeństwa. Legenda dotyczy się też następnych wykresów.
+```{r, warning=FALSE}
+ggplot(df, aes(x = SIBS, y = CHILDS, color = SEX)) + 
+  geom_smooth(method='lm')
+```
+Zależność widoczna gołym okiem, jednak moim zdaniem należy tu wziąć poprawkę na czas. Zbiór danych sięga 50 lat wstecz, gdy większe rodziny były standardem. 
+
+Warto także sprawdzić jak na przestrzeni czasu wygląda średni poziom edukacji oraz średni wiek badanych.
+```{r, warning=FALSE}
+plot1 <- ggplot(df, aes(x = YEAR, y = CHILDS, color = SEX)) + 
+  geom_smooth(method='lm') + theme(legend.position = 'none')
+plot2 <- ggplot(df, aes(x = YEAR, y = SIBS, color = SEX)) + 
+  geom_smooth(method='lm') + theme(legend.position = 'none')
+plot3 <- ggplot(df, aes(x = YEAR, y = EDUC, color = SEX)) + 
+  geom_smooth(method='lm') + theme(legend.position = 'none')
+plot4 <- ggplot(df, aes(x = YEAR, y = AGE, color = SEX)) + 
+  geom_smooth(method='lm') + theme(legend.position = 'none')
+grid.arrange(plot1, plot2, plot3, plot4, ncol=2, nrow = 2)
+```
+Rzeczywiście widoczny jest znaczny (mniej więcej o 20%) spadek obu tych wartości. Moim zdaniem zmiana obu wartości jest wynikiem innych czynników i pomimo korelacji nie dopatrywałbym się efektów przyczynowo-skutkowych w żadną stronę.
+
+Poniżej wykres obrazujący religijność społeczeństwa na przestrzeni badanych lat.
+```{r, warning=FALSE}
+ggplot(df, aes(x = YEAR, fill = religious))+
+  geom_histogram(stat='count', alpha = 0.3, position = 'identity')
+```
+
+Jak w przypadku edukacji zmiana jest delikatna, na przestrzeni 50 lat średnia liczba ukończonych klas to 2 u mężczyzn (+17%) i 2.5 u kobiet (+22%). W przypadku osób deklarujących ateizm przyrost jest znaczny. Od wartości marginalnych (~5%) wzrost jest 4.5 krotny do prawie 1/4 badanej populacji.
+
+
+# Modele
+
+Na potrzeby tego rozdziału podzielimy dane na zbiór treningowy i testowy w proporcji 4:1. Testować będziemy jedynie najlepiej sprawdzający się na danych treningowych model.
+
+```{r, warning=FALSE}
+set.seed(7777777)
+train_ind <- sample(seq_len(nrow(df)), size = floor(0.8 * nrow(df)))
+train <- df[train_ind, ]
+test <- df[-train_ind,]
+expected_results <- test[,'CHILDS']
+test <- test[ , ! names(test) %in% 'CHILDS']
+```
+
+
+
+##  Regresja liniowa
+
+Model zerowy, do którego będziemy porównywać badając efektywność, będzie oparty na zmiennej roku uzyskania odpowiedzi. 
+
+```{r, warning=FALSE}
+model.year <-lm(formula = CHILDS ~ YEAR, data = train)
+summary(model.year)
+```
+
+Jak widzimy model sprawuje się słabo, R kwadrat bliskie 0 to bardzo nisko zawieszona poprzeczka. Oglądanie wykresów diagnostycznych mija się z celem. Zobaczmy czy wiek będzie lepszym predyktorem ilości dzieci.
+
+```{r, warning=FALSE}
+model.age <-lm(formula = CHILDS ~ AGE, data = train)
+summary(model.age)
+par(mfrow=c(2,2))
+plot(model.age, pch = '.')
+```
+
+Zdecydowanie lepiej, jednak wciąż mało satysfakcjonujące rezultaty. Wydaje się, że predykcje modelu są z grubsza losowe, dodatkowo prawie że nie zwraca wartości między 0 i 1, ani większych od 3.5. 
+
+
+Uwagę przykuwają także wykresy diagnostyczne, linie reszt modelu wynikają z dyskretnego i całościowego faktu posiadania dzieci. W rzeczywistym świecie nie jest możliwe urodzenie połowy dziecka, jednak nasz model będzie zwracać wartości ułamkowe. Należy traktować je jako prawdopodobieństwo posiadania potomka tj 0.2 oznacza 20% na jedno dziecko, 2.8 prawdopodobne dwa + trzecie na 80%. Jeśli chcielibyśmy wynik w wartościach całościowych należałoby go zaokrąglać w funkcji optymalizującej. W pełni mnie satysfakcjonuje jednak wynik probabilistyczny.
+
+
+Ze zmiennych liczbowych mamy jeszcze ilość ukończonych klas.
+
+```{r, warning=FALSE}
+model.class <-lm(formula = CHILDS ~ EDUC, data = train)
+summary(model.class)
+```
+
+Ten predyktor sprawia się gorzej niż wiek, lepiej niż rok pobrania zmiennej. Można wysnuć wnioski, że taka zależność rzeczywiście istnieje, jednak samodzielna nie jest istotnie znacząca.
+
+
+```{r, warning=FALSE}
+model.sibs <-lm(formula = CHILDS ~ SIBS, data = train)
+summary(model.sibs)
+```
+
+
+
+## Regresja wieloliniowa
+
+Opierając się na dwóch najlepiej dopasowanych modelach z poprzedniego rozdziału, pierwszym wielorakim modelem regresji liniowej będzie szacujący ilość dzieci na podstawie wieku i ilości ukończonych klas.
+
+```{r, warning=FALSE}
+model.ageclass <-lm(formula = CHILDS ~ AGE+EDUC, data = train)
+summary(model.ageclass)
+```
+
+Znacznie lepiej niż modele z jedną zmienną. Dodatkowym atutem jest szerszy zakres zwracanych wartości, niestety za tym idzie większy rozrzut reszt naszego modelu. Sprawdźmy czy dodanie zmiennej odpowiedzialnej za rok pochodzenia wpisu poprawi nasze predykcje.
+
+
+```{r, warning=FALSE}
+model.ageclassyear <- lm(formula = CHILDS ~ AGE+EDUC+YEAR, data = train)
+summary(model.ageclassyear)
+```
+
+Statystyki dopasowania modelu lekko się poprawiły, jednak dodanie roku ma minimalny wpływ.
+
+Wiemy że poziom wykształcenia zmieniał się z czasem, tak samo jak średni wiek badanej osoby (malejący przyrost i poprawa świadczeń medycznych). Nie mamy pewności czy istnieje zależność wiek/edukacja, ale wydawałoby się to logiczne. Sprawdźmy jak poradzi sobie potrójny model z uwzględnieniem interakcji.
+
+```{r, warning=FALSE}
+model.interactions <-lm(formula = CHILDS ~ AGE*EDUC*YEAR, data = train)
+summary(model.interactions)
+```
+
+Statystyki wyglądają lepiej niż modelu bez interakcji, jednak wciąż jest dalece odbiegający od ideału...
+
+
+Ponownie ostatnią możliwą zmienną liczbową jest liczba rodzeństwa.
+
+```{r, warning=FALSE}
+model.interactions2 <-lm(formula = CHILDS ~ AGE*EDUC*YEAR*SIBS, data = train)
+summary(model.interactions2)
+```
+
+O dziwo poprawa modelu jest znaczna. Może liczba rodzeństwa ma jednak wpływ na liczbę potomków? Współczynniki modelu sugerują wpływ rzędu 1.6 "dodatkowego" dziecka na dziesięcioro rodzeństwa. Tego typu zależność mogłaby oznaczać, że malejąca dzietność społeczeństwa ma wpływ na dodatkowo malejącą dzietność przyszłych pokoleń. Jednak zagadnienie wydaje się zbyt skomplikowane żeby je wprowadzać jako dodatkowy element.
+
+
+## Analiza wariancji
+
+W tym rozdziale będziemy wyjaśniać dzietność na podstawie zmiennych kategorycznych: płci, religii, statusu pracy oraz uzyskanego stopnia wykształcenia.
+
+Zdecydowałem się użyć funkcji lm() zamiast aov() ze względu na wygodę uzyskania statystyki R kwadrat
+```{r, warning=FALSE}
+model.wrk <-lm(formula = CHILDS ~ WRKSTAT, data = train) 
+summary(model.wrk)
+```
+
+Model źle dopasowany, jednak lepiej niż nasz model zerowy, a nawet opierający się jedynie o ilość ukończonych klas. Pozwolę sobie zakończyć na jednym przykładzie jednoczynnikowe modele AOV.
+
+```{r, warning=FALSE}
+model.aov <-lm(formula = CHILDS ~ WRKSTAT+DEGREE+religious, data = train) 
+summary(model.aov)$adj.r.squared
+```
+
+Jak widać nawet łącząc trzy zmienne nie osiągneliśmy poziomu dopasowania modelu opartego jedynie o wiek. Wiemy jednak, że poziom edukacji jak i status zatrudnienia wpływa nieco inaczej w zależności od płci. Dodajmy tę zmienną i uwzględnijmy interakcje.
+
+
+```{r, warning=FALSE}
+model.aov.interaction <-lm(formula = CHILDS ~ SEX*WRKSTAT + SEX*DEGREE+religious, data = train) 
+summary(model.aov.interaction)$adj.r.squared
+```
+
+Model zyskał nieco na efektywności, jednak kosztem znacznego zwiększenia ilości współczynników. 
+W związku z niewielkim postępem, a coraz bardziej skomplikowanym modelem podarujemy sobie resztę potencjalnych modeli AOV.
+
+
+## Analiza kowariancji
+
+W tej części przeanalizujemy najbardziej obiecujący model regresji wielorakiej i stopniowo będziemy dodawać składowe modeli AOV. 
+
+Na pierwszy ogień pójdzie model ze wszystkimi zmiennymi.
+
+```{r, warning=FALSE}
+model.all <-lm(formula = CHILDS ~ ., data = train) 
+summary(model.all)$adj.r.squared
+```
+
+Nie jest dobrze, pomimo wrzucenia wszystkich czynników (nie wszystkich możliwych, model jest bez interakcji) osiągamy niską skuteczność predykcji obarczoną olbrzymim błędem. 
+
+Wróćmy do najlepszego modelu wielorakiego. Zaczyniemy od dodania do niego predyktora odpowiadającego religijności.
+
+
+```{r, warning=FALSE}
+model.acov <-lm(formula = CHILDS ~ AGE*YEAR*EDUC*SIBS + religious, data = train) 
+summary(model.acov)$adj.r.squared
+```
+
+Poprawiło to jedynie minimalnie statystykę R kwadrat i błąd standardowy o tysięczne części... Spróbujmy szczęścia dodając interakcję płci ze statusem zatrudnienia i poziomem wykształcenia. Opierając się na końcowych wykresach wglądu w dane dodatkowo zaryzykowałbym dodanie interakcji płci do pierwszej wieloliniowej zależności.
+
+Dodatkowo podejrzewam istnienie zależności: 
+  wiek\~płeć\~status zatrudnienia (dawniej kobiety częściej zajmowały się domem + zależności emerytalne)
+  stopień naukowy~liczba ukończonych klas
+  
+W celu skrócenia już przydługiej analizy dodam je wszystkie w jednym kroku.
+
+```{r, warning=FALSE}
+model.acov2 <-lm(formula = CHILDS ~ SEX*AGE*EDUC*YEAR*SIBS + religious + 
+                   SEX*AGE*WRKSTAT + SEX*AGE*EDUC*DEGREE, data = train) 
+summary(model.acov2)$adj.r.squared
+
+par(mfrow=c(2,2))
+plot(model.acov2, pch = '.')
+```
+
+Udało się pokonać granicę wyznaczaną przez model z pełnym zestawem danych bez interakcji. Dodatkowo wartości zwracane przez model są zróżnicowane (maksymalnie osiągając >6, niestety pojawiły się oczekiwane dzieci "ujemne" co ciężko mi racjonalnie zinterpretować) Jednak spora część współczynników modelu ma wartości t bliskie zeru, o nikłym znaczeniu.
+
+Ostatni model będzie szacował zlogarytmowaną liczbę dzieci powiększoną o liczbę e.
+
+```{r, warning=FALSE}
+train$logCHILDS <- log(train[,'CHILDS']+exp(1))
+model.acov3 <-lm(formula = logCHILDS ~ SEX*AGE*EDUC*YEAR*SIBS + religious + 
+                   SEX*AGE*WRKSTAT + SEX*AGE*EDUC*DEGREE, data = train) 
+
+summary(model.acov3)$adj.r.squared
+
+par(mfrow=c(2,2))
+plot(model.acov3, pch = '.')
+```
+
+Wydaje się że zlogarytmowanie mogło trochę pomóc, ale zaraz okaże się czy odwracanie tej operacji obarczone błędem implementacji tak skomplikowanych przekształceń nie powiększy i tak niemałych problemów modelu.
+
+
+## Opytmalizacja
+
+Ostatnim krokiem będzie optymalizacja 4 najlepszych modeli za pomocą funkcji step(). W trosce o czytelność pracy zdecydowałem się ukryć kroki optymalizacji.
+
+```{r, results = 'hide'}
+model.opt.all <- step(model.all)
+model.opt.acov2 <- step(model.acov2)
+model.opt.acov3 <- step(model.acov3)
+```
+
+
+# Testy
+
+## Test modeli
+
+Najpierw sprawdzimy wartości AIC najlepszych modeli.
+
+```{r, warning=FALSE}
+extractAIC(model.all)[2]
+extractAIC(model.opt.all)[2]
+extractAIC(model.acov)[2]
+extractAIC(model.opt.acov2)[2]
+extractAIC(model.acov2)[2]
+extractAIC(model.acov3)[2]
+extractAIC(model.opt.acov3)[2]
+```
+
+Rzeczywiście najniższą wartość daje ostatni model, jednak tak duża róźnica wydaje się podejrzana. W celu weryfikacji policzymy RMSE dla danych testowych.
+
+```{r, warning=FALSE}
+prediction.all <- as.numeric(predict(model.all, test))
+prediction.opt.all <- as.numeric(predict(model.opt.all, test))
+prediction.acov <- as.numeric(predict(model.acov, test))
+prediction.acov2 <- as.numeric(predict(model.acov2, test))
+prediction.opt.acov2 <- as.numeric(predict(model.opt.acov2, test))
+prediction.acov3 <- exp(1)^as.numeric(predict(model.acov3, test))-exp(1)
+prediction.opt.acov3 <- exp(1)^as.numeric(predict(model.opt.acov3, test))-exp(1)
+
+rmse(prediction.opt.all, expected_results)
+rmse(prediction.all, expected_results)
+rmse(prediction.acov, expected_results)
+rmse(prediction.acov2, expected_results)
+rmse(prediction.opt.acov2, expected_results)
+rmse(prediction.acov3, expected_results)
+rmse(prediction.opt.acov3, expected_results)
+```
+
+Rzeczywiście ostatni model okazuje się nie być najlepszy, ten sam wzór modelu dla nieprzekształcanej ilości dzieci po zdobywa pierwsze miejsce po optymalizacji, drugie bez optymalizacji funkcją step(). 
+
+# Wnioski:
+
+Pomimo sprawdzenia wielu modeli, predykcje są obarczone dużym błędem. Podjęta próba zlogarytmowania przyniosła przeciwne do oczekiwanych rezultaty.
+
+
+##  Wyższe wykształcenie koreluje z mniejszą liczbą potomków.
+  
+Uważam, że hipoteza została potwierdzona wykresami analizy, oraz parametrami modeli - odejmując ułamki oczekiwanych dzieci za każdą ukończoną klasę, oraz "premiujących" osoby z niższym wykształceniem.
+  
+  
+## Brak wyznawanej religii koreluje z mniejszą liczbą potomków.
+  
+Uważam, że hipoteza została delikatnie potwierdzona wykresami analizy, oraz parametrami modeli - dodając oczekiwane 0.3 dziecka osobom wyznającym religie.
+  
+
+## Aktywność zawodowa koreluje z mniejszą liczbą potomków.
+  
+Uważam, że hipotezę należy odrzucić ze względu na brak jednoznacznych wyników analizy danych oraz modeli. Problem jest zbyt skomplikowany i należałoby go rozbić na pomniejsze hipotezy z rozróżnieniem płci, oraz rozbiciem na grupy wiekowe uwzględniające oddzielnie uczniów i emerytów.
